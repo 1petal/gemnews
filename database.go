@@ -304,13 +304,13 @@ func ArticleDisplayContent(db *sql.DB, URL string) {
 
 }
 
-func displayArticlByDay(db *sql.DB) {
+func displayArticlByDay(db *sql.DB, days int) {
 
 	loc, _ := time.LoadLocation("UTC")
 	timeend := time.Now().In(loc)
 	timestart := beginningofday(timeend)
 
-	for theDay := 1; theDay < 5; theDay++ {
+	for theDay := 0; theDay < days; theDay++ {
 
 		/*
 			backHours := time.Hour * time.Duration(-theDay)

@@ -14,11 +14,12 @@ func main() {
 	debug := false
 
 	// Command line flags control behavior
-	debugPtr := flag.Bool("d", false, "Debug flag")
+	debugPtr := flag.Bool("debug", false, "Debug flag")
 	flag.StringVar(&dbpath, "db", "sqlite.db", "SQLite database path")
 	loadptr := flag.Bool("l", false, "Load articles flag")
 	dumpptr := flag.Bool("dump", false, "dump database contents")
 	cretryptr := flag.Bool("cretry", false, "Content Databse load/retry")
+	daysPtr := flag.Int("days", 5, "Days to display")
 
 	flag.Parse()
 
@@ -44,6 +45,6 @@ func main() {
 
 	} else {
 
-		displayArticlByDay(db)
+		displayArticlByDay(db, *daysPtr)
 	}
 }
