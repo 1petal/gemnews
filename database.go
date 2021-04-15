@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"database/sql"
 	"fmt"
 	"hash/fnv"
+	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
@@ -15,55 +17,21 @@ import (
 	_ "github.com/mattn/go-sqlite3" // Import go-sqlite3 library
 )
 
-func errHandle(err error, debug bool) {
-	if err != nil {
-		if debug {
-			log.Fatal(err)
-		} else {
-			log.Println(err)
-		}
-	}
-}
-
 func dbinit(dbpath string, debug bool) *sql.DB {
-	//usage argv[0] database/path ip
-	// quite low on error checking at the moment. Hoping to purchase more later
-
-	//os.Remove(os.Args[1]) // sometimes I delete for testing
-	// SQLite is a file based database.
 
 	if !fileExists(dbpath) {
 		createDBfile(dbpath)
+		sqliteDatabase, _ := sql.Open("sqlite3", dbpath)
+		newsTablesInit(sqliteDatabase, debug)
+		sqliteDatabase.Close()
 	}
 
 	sqliteDatabase, _ := sql.Open("sqlite3", dbpath) // Open the created SQLite File
-	// defer sqliteDatabase.Close()                     // Defer Closing the database
 
-	newsTableInit(sqliteDatabase, debug)
-
-	// getIp2cCountry(sqliteDatabase, os.Args[2])
-
+	// defer sqliteDatabase.Close()                     // Defer Closing the database in main
 	//updateHashes(sqliteDatabase)
 
 	return sqliteDatabase
-}
-
-func fileExists(filename string) bool {
-	info, err := os.Stat(filename)
-	if os.IsNotExist(err) {
-		return false
-	}
-	return !info.IsDir()
-}
-
-func which(bin string) string {
-	pathList := []string{"/usr/bin", "/sbin", "/usr/sbin", "/usr/local/bin"}
-	for _, p := range pathList {
-		if _, err := os.Stat(path.Join(p, bin)); err == nil {
-			return path.Join(p, bin)
-		}
-	}
-	return bin
 }
 
 func createDBfile(path string) {
@@ -90,9 +58,9 @@ func createDBfile(path string) {
 	file.Close()
 }
 
-func newsTableInit(db *sql.DB, debug bool) {
+func newsTablesInit(db *sql.DB, debug bool) {
 
-	createArticleTableSQL := `CREATE TABLE if not exists newsarticle (
+	createNewsArticleTableSQL := `CREATE TABLE if not exists newsarticle (
 		"id" integer NOT NULL PRIMARY KEY AUTOINCREMENT,
 		"hash" integer KEY,
 		"title" TEXT,
@@ -101,7 +69,7 @@ func newsTableInit(db *sql.DB, debug bool) {
 		"date", int
 		);` // SQL Statement for Create Table
 
-	statement, err := db.Prepare(createArticleTableSQL) // Prepare SQL Statement
+	statement, err := db.Prepare(createNewsArticleTableSQL) // Prepare SQL Statement
 	if err != nil {
 		log.Fatal(err.Error())
 	}
@@ -110,10 +78,35 @@ func newsTableInit(db *sql.DB, debug bool) {
 	if debug {
 		log.Println("newsarticle table init exec")
 	}
+
+	createArticlesTableSQL := `CREATE TABLE if not exists articles (
+		"id" integer NOT NULL PRIMARY KEY AUTOINCREMENT,
+		"hash" integer KEY,
+		"title" TEXT,
+		"url" TEXT,
+		"topimage" TEXT,
+		"domain" TEXT,
+		"date" integer, 
+		"keywords" TEXT, 
+		"description" TEXT,
+		"raw" integer, 
+		"content" BLOB
+		);` // SQL Statement for Create Table
+
+	statement, err = db.Prepare(createArticlesTableSQL) // Prepare SQL Statement
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+	statement.Exec() // Execute SQL Statements
+
+	if debug {
+		log.Println("newsarticle table init exec")
+	}
+
 }
 
 // We are passing db reference connection from main to our method with other parameters
-func insertarticle(db *sql.DB, title, url, domain string, date uint64, hash uint32) {
+func articleInsertIndex(db *sql.DB, title, url, domain string, date uint64, hash uint32) {
 
 	insertIp2cSQL := `INSERT INTO newsarticle(title, url, domain, date, hash) VALUES (?, ?, ?, ?, ?)`
 	statement, err := db.Prepare(insertIp2cSQL) // Prepare statement.
@@ -126,6 +119,23 @@ func insertarticle(db *sql.DB, title, url, domain string, date uint64, hash uint
 		log.Fatalln(err.Error())
 	}
 }
+
+func articleInsertContent(db *sql.DB, title, url, domain, topimage, keywords, description, content string, raw int) {
+
+	insertArticleSQL := `INSERT INTO articles(title, url, domain, topimage, keywords, description, hash, content, raw, date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	statement, err := db.Prepare(insertArticleSQL) // Prepare statement.
+	// This is good to avoid SQL injections
+	if err != nil {
+		log.Fatalln("db.Prep", err.Error())
+	}
+	urlhash := urlhash(url)
+
+	_, err = statement.Exec(title, url, domain, topimage, keywords, description, urlhash, zip(content), raw, getEpochTime())
+	if err != nil {
+		log.Fatalln("db.Exec", err.Error())
+	}
+}
+
 func artexist(db *sql.DB, hash uint32, debug bool) bool {
 
 	row := db.QueryRow("select title from newsarticle where hash= ?", hash)
@@ -143,6 +153,7 @@ func artexist(db *sql.DB, hash uint32, debug bool) bool {
 	}
 	return false
 }
+
 func urlexist(db *sql.DB, URL string, debug bool) bool {
 
 	row := db.QueryRow("select url from newsarticle where url= ?", URL)
@@ -155,6 +166,21 @@ func urlexist(db *sql.DB, URL string, debug bool) bool {
 	}
 
 	return false
+}
+
+func articleNoContent(db *sql.DB, URL string, debug bool) bool {
+
+	hash := urlhash(URL)
+	row := db.QueryRow("select url from articles where hash= ?", hash)
+
+	temp := ""
+	row.Scan(&temp)
+	if temp != "" {
+
+		return false
+	}
+
+	return true
 }
 
 func updateHashes(db *sql.DB) { //this shit didn't work
@@ -271,6 +297,44 @@ func displayArticleHours(db *sql.DB, oldhours int) {
 	}
 }
 
+func ArticleDisplayContent(db *sql.DB, URL string) {
+	row, err := db.Query("SELECT id,title,url,keywords,description,content FROM articles where url=?", URL)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer row.Close()
+
+	//title, url, topimage, keywords, description, content
+	var (
+		id          int64
+		title       string
+		url         string
+		keywords    string
+		description string
+		content     string
+	)
+	for row.Next() { // Iterate and fetch the records from result cursor
+
+		row.Scan(&id, &title, &url, &keywords, &description, &content)
+		fmt.Printf("id:%d\nTitle:%s\nkeywords:%s\ndesc:%s\nURL:%s\n", id, title, keywords, description, url)
+		fmt.Printf("----------------------\n%s\n------------------\n", unzip(content))
+
+	}
+
+}
+
+// Utility functions below -------------------------------------------------
+
+func errHandle(err error, debug bool) {
+	if err != nil {
+		if debug {
+			log.Fatal(err)
+		} else {
+			log.Println(err)
+		}
+	}
+}
+
 func checkCount(rows *sql.Rows) (count int) {
 	for rows.Next() {
 		err := rows.Scan(&count)
@@ -289,6 +353,10 @@ func smallhash(s string) uint32 {
 	h := fnv.New32a()
 	h.Write([]byte(s))
 	return h.Sum32()
+}
+
+func urlhash(URL string) uint32 {
+	return (smallhash(fmt.Sprintf(URL)))
 }
 
 func beginningofday(t time.Time) time.Time {
@@ -350,4 +418,55 @@ func displayArticlByDay(db *sql.DB) {
 			fmt.Println("")
 		}
 	}
+}
+
+func fileExists(filename string) bool {
+	info, err := os.Stat(filename)
+	if os.IsNotExist(err) {
+		return false
+	}
+	return !info.IsDir()
+}
+
+func which(bin string) string {
+	pathList := []string{"/usr/bin", "/sbin", "/usr/sbin", "/usr/local/bin"}
+	for _, p := range pathList {
+		if _, err := os.Stat(path.Join(p, bin)); err == nil {
+			return path.Join(p, bin)
+		}
+	}
+	return bin
+}
+
+func zip(in string) string {
+	var b bytes.Buffer
+	// gz := gzip.NewWriter(&b)
+	gz, _ := gzip.NewWriterLevel(&b, gzip.BestCompression)
+	if _, err := gz.Write([]byte(in)); err != nil {
+		panic(err)
+	}
+	if err := gz.Flush(); err != nil {
+		panic(err)
+	}
+	if err := gz.Close(); err != nil {
+		panic(err)
+	}
+	return (b.String())
+}
+
+func unzip(in string) string {
+	//fmt.Println("ZIP", in)
+
+	b := []byte(in)
+
+	rdata := bytes.NewReader(b)
+	r, _ := gzip.NewReader(rdata)
+	s, _ := ioutil.ReadAll(r)
+
+	//fmt.Println(string(s))
+	return (string(s))
+}
+
+func getEpochTime() int64 {
+	return time.Now().Unix()
 }

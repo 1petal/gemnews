@@ -18,6 +18,7 @@ func main() {
 	flag.StringVar(&dbpath, "db", "sqlite.db", "SQLite database path")
 	loadptr := flag.Bool("l", false, "Load articles flag")
 	dumpptr := flag.Bool("dump", false, "dump database contents")
+	cretryptr := flag.Bool("cretry", false, "Content Databse load/retry")
 
 	flag.Parse()
 
@@ -32,10 +33,14 @@ func main() {
 	if *loadptr {
 		// Load them articles!
 
-		loadNewArticles(db, debug)
+		newsLoadNewArticles(db, debug)
 
 	} else if *dumpptr {
 		displayArticleAll(db)
+
+	} else if *cretryptr {
+		newsTablesInit(db, debug)
+		newsContentRetry(db, debug)
 
 	} else {
 
