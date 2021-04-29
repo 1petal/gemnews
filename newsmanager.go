@@ -128,6 +128,7 @@ func newsLoadNewArticles(db *sql.DB, debug bool) {
 func newsContentRetrieval(db *sql.DB, URL string, debug bool) {
 
 	g := goose.New()
+	var retrievalfail bool //default to false
 	article, err := g.ExtractFromURL(URL)
 	if err != nil {
 		fmt.Println(err)
@@ -145,10 +146,22 @@ func newsContentRetrieval(db *sql.DB, URL string, debug bool) {
 		println("moreContent:", article.AdditionalData)
 	}
 
-	if len(article.CleanedText) > 5 {
+	if len(article.CleanedText) > 500 {
 		articleInsertContent(db, article.Title, URL, article.Domain, article.TopImage, article.MetaKeywords, article.MetaDescription, article.CleanedText, 0)
 
-	} else { ///could not parse out article content. Store raw for later processing
+	} else { ///could not parse out article content. Try fallback method
+
+		articletext := extractor(URL)
+
+		if len(articletext) > 5 {
+			articleInsertContent(db, article.Title, URL, article.Domain, article.TopImage, article.MetaKeywords, article.MetaDescription, articletext, 0)
+		} else {
+			retrievalfail = true
+		}
+	}
+
+	if retrievalfail { //can't get anything, just store raw content for later processing
+
 		var client http.Client
 		resp, err := client.Get(URL)
 		if err != nil {

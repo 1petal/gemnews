@@ -1,4 +1,4 @@
-package main
+package newsdata
 
 import (
 	"bytes"
@@ -17,6 +17,16 @@ import (
 	// _ "modernc.org/sqlite"
 	_ "github.com/mattn/go-sqlite3" // Import go-sqlite3 library
 )
+
+type ndata struct {
+	db    *sql.DB
+	debug bool
+}
+
+func New(dbpath string, debug bool) ndata {
+	newndata := ndata{dbinit(dbpath, debug), debug}
+	return newndata
+}
 
 func dbinit(dbpath string, debug bool) *sql.DB {
 
@@ -381,7 +391,7 @@ func displayArticlByDay(db *sql.DB, days int) {
 
 			row.Scan(&id, &title, &URL, &domain, &hash, &date)
 			if len(myname) > 5 {
-				mylink := fmt.Sprintf("%s?a=%d", myname, smallhash(URL))
+				mylink := fmt.Sprintf("%s?a=%d&b=%d", myname, smallhash(URL), hash)
 				fmt.Printf("=>%s %s | %s\n", mylink, time.Unix(int64(date), 0).UTC().Format("15:04"), title)
 			} else {
 				fmt.Printf("=>%s %s | %s\n", URL, time.Unix(int64(date), 0).UTC().Format("15:04"), title)
